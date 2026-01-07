@@ -1,5 +1,8 @@
 # netx
 
+> 🚧 This project is under active development.  
+> Built in public to explore networking internals step by step. kinda like v0ish
+
 hey there! netx is a little tool that helps you understand what's going on when you visit a website. you know how you type in a website address and magically a page appears? netx shows you all the secret steps that happen in between. i thought it would come handy in specific cases.
 
 this was supposed to be a weekend-project where i wanted to implement what i had learnt in my CN-1 course at uni, but yeah i also though its kinda helpful if you know what's taking so long for your web requests to open up, easily in your cli, presented in a "human-friendly manner"...this is a very initial prototype of the tool, i am sure i will try to improve this as far as possible.
