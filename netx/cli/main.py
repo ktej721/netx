@@ -6,7 +6,7 @@ from netx.core.phase_result import PhaseResult
 from netx.core.dns import run_dns_phase
 from netx.core.tcp import run_tcp_phase
 from netx.core.tls import run_tls_phase
-
+from netx.core.http import run_http_phase
 import time
 
 
@@ -121,6 +121,25 @@ def main():
     print(f"✓ {tls_result.name}  {tls_result.duration_ms:.2f} ms")
     print(f"  TLS version: {tls_result.data['tls_version']}")
     print(f"  Cipher: {tls_result.data['cipher']}")
+    print()
+
+    # ---- HTTP Request Phase ----
+    http_result = run_http_phase(
+        scheme=url_result.data["scheme"],
+        hostname=url_result.data["host"],
+        port=url_result.data["port"],
+        path=url_result.data["path"],
+    )
+
+    if not http_result.success:
+        print(f"✗ {http_result.name}  {http_result.duration_ms:.2f} ms")
+        print(f"  Reason: {http_result.error}")
+        sys.exit(1)
+
+    print(f"✓ {http_result.name}  {http_result.duration_ms:.2f} ms")
+    print(f"  Status: {http_result.data['status']} {http_result.data['reason']}")
+    print(f"  TTFB: {http_result.data['ttfb_ms']:.2f} ms")
+    print(f"  Response size: {http_result.data['response_bytes']} bytes")
     print()
 
 if __name__ == "__main__":
