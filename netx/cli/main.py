@@ -1,42 +1,66 @@
 import argparse
 import sys
 import json
-from netx.core.url_parse import parse_url
-from netx.core.phase_result import PhaseResult
-from netx.core.dns import run_dns_phase
-from netx.core.tcp import run_tcp_phase
-from netx.core.tls import run_tls_phase
-from netx.core.http import run_http_phase
-import time
+from typing import List
+
+from netx.core.engine import ExecutionEngine
+from netx.core.models import (
+    PhaseResult,
+    URLParseResult,
+    DNSResolutionResult,
+    TCPConnectResult,
+    TLSHandshakeResult,
+    HTTPRequestResult,
+)
 
 
-def run_url_parsing_phase(url: str) -> PhaseResult:
-    start = time.perf_counter()
+def print_banner(url: str):
+    print("▶ Network Explorer — v1.0 (Production Refactor)")
+    print(f"▶ Target: {url}\n")
 
-    try:
-        data = parse_url(url)
-    except ValueError as e:
-        end = time.perf_counter()
-        return PhaseResult(
-            name="URL parsing",
-            duration_ms=(end - start) * 1000,
-            success=False,
-            error=str(e),
-        )
 
-    end = time.perf_counter()
-    return PhaseResult(
-        name="URL parsing",
-        duration_ms=(end - start) * 1000,
-        success=True,
-        data=data,
-    )
+def print_result(result: PhaseResult):
+    symbol = "✓" if result.success else "✗"
+    print(f"{symbol} {result.name}  {result.duration_ms:.2f} ms")
+    
+    if not result.success:
+        print(f"  Error: {result.error}")
+        return
+
+    data = result.data
+    if isinstance(data, URLParseResult):
+        print(f"  scheme: {data.scheme}")
+        print(f"  host: {data.host}")
+        print(f"  port: {data.port}")
+        print(f"  path: {data.path}")
+    
+    elif isinstance(data, DNSResolutionResult):
+        for addr in data.addresses:
+            print(f"  {addr.family}: {addr.ip}")
+            
+    elif isinstance(data, TCPConnectResult):
+        print(f"  Connected to: {data.ip}:{data.port} ({data.family})")
+        
+    elif isinstance(data, TLSHandshakeResult):
+        if data.skipped:
+            print(f"  Skipped: {data.reason}")
+        else:
+            print(f"  Version: {data.tls_version}")
+            print(f"  Cipher: {data.cipher}")
+            print(f"  SNI: {data.sni}")
+            
+    elif isinstance(data, HTTPRequestResult):
+        print(f"  Status: {data.status_code} {data.reason}")
+        print(f"  Protocol: {data.proto}")
+        print(f"  Bytes Received: {data.bytes_received}")
+    
+    print()
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="netx",
-        description="Network Explorer — explain what happens during a network request"
+        description="Network Explorer — production-grade network diagnostics"
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -47,138 +71,75 @@ def main():
     )
     explain_parser.add_argument(
         "url",
-        help="Target URL to analyze"
+        help="Target URL to analyze (e.g., https://google.com)"
     )
     explain_parser.add_argument(
         "--json",
         action="store_true",
         help="Output results in JSON format"
     )
+    explain_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Timeout for each network phase (default: 5.0s)"
+    )
+    explain_parser.add_argument(
+        "--retries",
+        type=int,
+        default=3,
+        help="Number of retries for transient failures (default: 3)"
+    )
 
     args = parser.parse_args()
 
     if args.command != "explain":
         parser.print_help()
-        sys.exit(1)
+        sys.exit(0)
 
-    if not args.json:
-        # Header
-        print("▶ Network Explorer — v0.1")
-        print(f"▶ Target: {args.url}\n")
-
-    results = []
-    # ---- URL Parsing Phase ----
-    url_result = run_url_parsing_phase(args.url)
-    results.append(url_result)
-
-    if not url_result.success:
-        if not args.json:
-            print(f"✗ {url_result.name}  {url_result.duration_ms:.2f} ms")
-            print(f"  Reason: {url_result.error}")
-        sys.exit(1)
-
-    if not args.json:
-        print(f"✓ {url_result.name}  {url_result.duration_ms:.2f} ms")
-        for key, value in url_result.data.items():
-            print(f"  {key}: {value}")
-        print()
-
-    # ---- DNS Resolution Phase ----
-    dns_result = run_dns_phase(url_result.data["host"])
-    results.append(dns_result)
-
-    if not dns_result.success:
-        if not args.json:
-            print(f"✗ {dns_result.name}  {dns_result.duration_ms:.2f} ms")
-            print(f"  Reason: {dns_result.error}")
-        sys.exit(1)
-
-    if not args.json:
-        print(f"✓ {dns_result.name}  {dns_result.duration_ms:.2f} ms")
-        for addr in dns_result.data["addresses"]:
-            print(f"  {addr['family']}: {addr['ip']}")
-        print()
-
-    # ---- TCP Connection Phase ----
-    addr = dns_result.data["addresses"][0]
-
-    tcp_result = run_tcp_phase(
-        addr["ip"],
-        url_result.data["port"],
-        addr["family"]
+    engine = ExecutionEngine(
+        url=args.url,
+        timeout=args.timeout,
+        retries=args.retries
     )
-    results.append(tcp_result)
-
-    if not tcp_result.success:
-        if not args.json:
-            print(f"✗ {tcp_result.name}  {tcp_result.duration_ms:.2f} ms")
-            print(f"  Reason: {tcp_result.error}")
-        sys.exit(1)
 
     if not args.json:
-        print(f"✓ {tcp_result.name}  {tcp_result.duration_ms:.2f} ms")
-        print(f"  ip: {tcp_result.data['ip']}")
-        print(f"  port: {tcp_result.data['port']}")
-        print()
+        print_banner(args.url)
 
-    # ---- TLS Handshake Phase ----
-    if url_result.data["scheme"] == "https":
-        tls_result = run_tls_phase(
-            tcp_ip=tcp_result.data["ip"],
-            tcp_port=tcp_result.data["port"],
-            family=tcp_result.data["family"],
-            hostname=url_result.data["host"],
-        )
-        results.append(tls_result)
+    results = engine.run()
 
-        if not tls_result.success:
-            if not args.json:
-                print(f"✗ {tls_result.name}  {tls_result.duration_ms:.2f} ms")
-                print(f"  Reason: {tls_result.error}")
-            sys.exit(1)
-
-        if not args.json:
-            print(f"✓ {tls_result.name}  {tls_result.duration_ms:.2f} ms")
-            print(f"  TLS version: {tls_result.data['tls_version']}")
-            print(f"  Cipher: {tls_result.data['cipher']}")
-            print()
-
-    # ---- HTTP Request Phase ----
-    http_result = run_http_phase(
-        scheme=url_result.data["scheme"],
-        hostname=url_result.data["host"],
-        port=url_result.data["port"],
-        path=url_result.data["path"],
-    )
-    results.append(http_result)
-
-    if not http_result.success:
-        if not args.json:
-            print(f"✗ {http_result.name}  {http_result.duration_ms:.2f} ms")
-            print(f"  Reason: {http_result.error}")
-        sys.exit(1)
-
-    if not args.json:
-        print(f"✓ {http_result.name}  {http_result.duration_ms:.2f} ms")
-        print(f"  Status: {http_result.data['status']} {http_result.data['reason']}")
-        print(f"  TTFB: {http_result.data['ttfb_ms']:.2f} ms")
-        print(f"  Response size: {http_result.data['response_bytes']} bytes")
-        print()
-    
     if args.json:
-        total_duration = sum(r.duration_ms for r in results)
-        overall_success = all(r.success for r in results)
+        # For JSON output, we still need to handle the dataclasses
+        def default_serializer(o):
+            if hasattr(o, '__dict__'):
+                return o.__dict__
+            return str(o)
 
-        json_output = {
-            "results": [r.__dict__ for r in results],
-            "summary": {
-                "total_duration_ms": total_duration,
-                "overall_success": overall_success,
-            }
+        output = {
+            "target": args.url,
+            "success": engine.is_success,
+            "total_duration_ms": engine.total_duration_ms,
+            "phases": [
+                {
+                    "name": r.name,
+                    "success": r.success,
+                    "duration_ms": r.duration_ms,
+                    "data": r.data,
+                    "error": r.error
+                } for r in results
+            ]
         }
-        print(json.dumps(json_output, indent=2))
+        print(json.dumps(output, indent=2, default=default_serializer))
+    else:
+        for r in results:
+            print_result(r)
+        
+        if engine.is_success:
+            print(f"✔ Completed successfully in {engine.total_duration_ms:.2f} ms")
+        else:
+            print(f"✘ Pipeline failed at {results[-1].name}")
+            sys.exit(1)
 
 
 if __name__ == "__main__":
     main()
-
